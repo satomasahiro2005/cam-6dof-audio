@@ -48,7 +48,7 @@ The same pose can be driven from the keyboard (no camera needed).
 Playback modes:
 
 - **Demo** — five objects in the room
-- **Stereo pair** — L/R stay L/R. At the calibrated origin the renderer is a dry pass-through; off-center it applies ITD/ILD from the virtual FL/FR speakers
+- **Stereo pair** — L/R stay L/R. Spatializer **ears** is a dry pass-through at the calibrated origin, then ITD/ILD off-center. Spatializer **HRTF** keeps the original SADIE KU100 path (Resonance Audio / Omnitone, ~17–18 cm ear span, not a personalized HRTF)
 - **Virtual multichannel** — STFT split of a stereo file or live input onto six objects
 
 Speaker **layout** (Stereo ±30°, ITU 5.0, Quad, desktop, far, height, …) and **layout distance** can be switched from the UI. They move the objects the current mode is using.
@@ -73,11 +73,27 @@ STFT center extraction first. If the worklet cannot load, it falls back to a mid
 ```
 camera → MediaPipe Face Landmarker
       → pose relative to calibration
-      → listener (ears ITD, or Resonance Audio 3rd-order Ambisonics + HRTF)
+      → listener (ears ITD, or Resonance Audio 3rd-order + SADIE KU100 HRTF)
 
 audio input / stereo file
-      → stereo pair worklet  (identity = copy, else ITD/ILD)
+      → stereo pair: dry+ITD worklet, or L/R into KU100 objects
       → or STFT upmix (C/FL/FR/SL/SR/T) → one object each
 ```
 
 If Resonance Audio is missing, Web Audio `PannerNode` (HRTF) is the fallback. Room reverb is off unless you enable it.
+
+## License
+
+Original code in this repo is **MIT** (see `LICENSE`). That is compatible with the Apache-2.0 / MIT libraries loaded at runtime; those keep their own terms.
+
+Third-party pieces loaded at runtime:
+
+| Piece | License |
+| --- | --- |
+| Resonance Audio (Google) | Apache-2.0 |
+| Omnitone binaural decoder (Google) | Apache-2.0 |
+| SADIE KU100 HRIRs (University of York), baked into that decoder | data used under Google’s Spatial Audio / SADIE integration; attribute SADIE / York |
+| MediaPipe Face Landmarker | Apache-2.0 |
+| Three.js | MIT |
+
+KU100 is a dummy-head set, not a scan of the listener. Ear span is fixed by the measurement (~17–18 cm), not the head-radius slider.

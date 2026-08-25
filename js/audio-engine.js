@@ -144,6 +144,7 @@ export class SpatialEngine {
     this.spatializer = mode === "hrtf" ? "hrtf" : "ears";
     if (this.hrtfBus) this.hrtfBus.gain.value = this.spatializer === "hrtf" ? 1 : 0;
     if (this.earsBus) this.earsBus.gain.value = this.spatializer === "ears" ? 1 : 0;
+    if (this.mode === "pair") return this._applyPairRoute();
   }
 
   setHeadRadius(meters) {
@@ -383,9 +384,9 @@ export class SpatialEngine {
       this.liveNode.connect(this.upmixInput);
       this.setMode("upmix");
     } else {
-      await this._ensureStereo6DoF();
-      this.liveNode.connect(this.stereo6dof);
+      this._pairIn = this.liveNode;
       this.setMode("pair");
+      await this._applyPairRoute();
     }
     this.upmixLabel = stream.getAudioTracks()[0]?.label || "audio-input";
     return { kind: this.mode === "upmix" ? this.upmixKind : "pair", label: this.upmixLabel, channels: this.liveNode.channelCount };
@@ -416,9 +417,9 @@ export class SpatialEngine {
       src.connect(this.upmixInput);
       this.setMode("upmix");
     } else {
-      await this._ensureStereo6DoF();
-      src.connect(this.stereo6dof);
+      this._pairIn = src;
       this.setMode("pair");
+      await this._applyPairRoute();
     }
     src.start();
     this.upmixSrc = src;
@@ -442,6 +443,64 @@ export class SpatialEngine {
     this._pushStereoPose();
   }
 
+  _disconnectPairFeeds() {
+    const node = this._pairIn;
+    if (node) {
+      try {
+        node.disconnect(this.stereo6dof);
+      } catch {
+        /* not connected */
+      }
+      try {
+        node.disconnect(this.pairSplit);
+      } catch {
+        /* not connected */
+      }
+    }
+    if (this.pairSplit) {
+      try {
+        this.pairSplit.disconnect();
+      } catch {
+        /* noop */
+      }
+    }
+  }
+
+  async _applyPairRoute() {
+    if (this.mode !== "pair" || !this._pairIn) return;
+    this._disconnectPairFeeds();
+    const fl = this.sources.get("upmix-FL");
+    const fr = this.sources.get("upmix-FR");
+    const hrtf = this.spatializer === "hrtf";
+    if (hrtf) {
+      if (!this.pairSplit) this.pairSplit = this.ctx.createChannelSplitter(2);
+      this._pairIn.connect(this.pairSplit);
+      if (fl) {
+        this.pairSplit.connect(fl.gain, 0);
+        fl.gain.gain.value = fl.userGain;
+      }
+      if (fr) {
+        this.pairSplit.connect(fr.gain, 1);
+        fr.gain.gain.value = fr.userGain;
+      }
+      try {
+        this.stereo6dof?.disconnect();
+      } catch {
+        /* noop */
+      }
+    } else {
+      await this._ensureStereo6DoF();
+      this._pairIn.connect(this.stereo6dof);
+      try {
+        this.stereo6dof.connect(this.master);
+      } catch {
+        /* already connected */
+      }
+      if (fl) fl.gain.gain.value = 0;
+      if (fr) fr.gain.gain.value = 0;
+    }
+  }
+
   setMode(mode) {
     if (mode === "stereo") mode = "pair";
     this.mode = mode;
@@ -458,10 +517,14 @@ export class SpatialEngine {
       const s = this.sources.get(spec.id);
       if (!s) continue;
       if (demo) s.gain.gain.value = 0;
+      else if (pair && this.spatializer !== "hrtf") s.gain.gain.value = 0;
+      else if (pair && (spec.id === "upmix-FL" || spec.id === "upmix-FR")) s.gain.gain.value = s.userGain;
       else if (pair) s.gain.gain.value = 0;
       else s.gain.gain.value = s.userGain;
     }
     if (demo) this._stopUpmixSrc();
+    if (pair) this._applyPairRoute();
+    else this._disconnectPairFeeds();
   }
 
   setUpmixParam(name, value) {
@@ -634,6 +697,8 @@ export class SpatialEngine {
       /* noop */
     }
     this.upmixSrc = null;
+    this._pairIn = null;
+    this._disconnectPairFeeds();
     this.stopLiveInput();
   }
 
