@@ -1,67 +1,76 @@
 # Cam 6DoF Audio
 
-Webカメラで頭部の位置と向き（6DoF）を取り、空間オーディオエンジンでバイノーラル再生する。
+Webcam head tracking (6DoF) driving a binaural spatial audio engine in the browser.
 
-既存の近いものは [Cat3DA](https://git.iem.at/lukas_goelles/cat3da)（Ambisonics 専用プレーヤー）。こちらはオブジェクトベースの音源を Resonance Audio で置き、カメラ姿勢をリスナーに直結する。
-
-## 必要なもの
+## Requirements
 
 - Chrome / Edge
-- ヘッドホン
-- Webカメラ
-- ローカル HTTP（カメラ API は `file://` では動かない）
+- Headphones
+- Webcam
+- Local HTTP (the camera API does not work on `file://`)
 
 ```powershell
 cd C:\Users\masahiro\workspace\cam-6dof-audio
 python -m http.server 8765
 ```
 
-ブラウザで `http://localhost:8765` を開く。
+Open `http://localhost:8765`.
 
-## 使い方
+## Usage
 
-1. ヘッドホンをつける
-2. **一覧** か **開始** でマイクを許可する（許可前は名前が出ない）。そのあと入力デバイスを選ぶ
-3. **開始** → カメラ許可 → 正面を見て **キャリブレーション**
-4. 頭を回す（3DoF）／前後左右に傾ける（6DoF）
-5. ファイルをドロップしても再生できる
+1. Put headphones on
+2. Click **List** or **Start** and allow the microphone (device names stay hidden until then), then pick an input
+3. **Start** → allow the camera → look forward and hit **Calibrate**
+4. Turn your head (3DoF) or lean (6DoF)
+5. Drop a file to play it
 
-PCの再生音を回したいときは VB-CABLE や VoiceMeeter を入力に選ぶ。ブラウザはループバックを直接は出さない。エコーキャンセルは切ってあるので、ヘッドホン推奨。
+To route PC playback, pick VB-CABLE or VoiceMeeter as the input. Browsers have no loopback of their own. Echo cancellation is off, so headphones are the point.
 
-キーボードでも同じポーズを動かせる（カメラなしの確認用）。
+The same pose can be driven from the keyboard (no camera needed).
 
-| キー | 操作 |
+| Key | Action |
 | --- | --- |
-| WASD | 前後左右 |
-| R / F | 上下 |
+| WASD | Move |
+| R / F | Up / down |
 | ← → | Yaw |
 | ↑ ↓ | Pitch |
 | Q / E | Roll |
-| C | キャリブレーション |
-| 0 / 3 / 6 | DoF モード |
+| C | Calibrate |
+| 0 / 3 / 6 | DoF mode |
 
-## ステレオ → 仮想マルチチャンネル
+Playback modes:
 
-再生モードを **ステレオ → 仮想マルチ** にすると、2ch を次の6本に分けて部屋に置く。
+- **Demo** — five objects in the room
+- **Stereo pair** — L/R stay L/R. At the calibrated origin the renderer is a dry pass-through; off-center it applies ITD/ILD from the virtual FL/FR speakers
+- **Virtual multichannel** — STFT split of a stereo file or live input onto six objects
 
-| 出力 | 中身 |
+Speaker **layout** (Stereo ±30°, ITU 5.0, Quad, desktop, far, height, …) and **layout distance** can be switched from the UI. They move the objects the current mode is using.
+
+The 3D view: drag to orbit, right-drag to pan, wheel to zoom, double-click to reset. Behind / mirror still snap the camera back to those presets.
+
+## Stereo → virtual multichannel
+
+In **virtual multichannel** mode, 2ch is split onto six sources in the room.
+
+| Output | Content |
 | --- | --- |
-| C | 同相で左右に共通な成分（ボーカル／バスなど） |
-| FL / FR | センターを引いた左右固有 |
-| SL / SR | サイド／逆相。遅延を少しずらしてアンビエンス |
-| T | サイドの高域。頭の上 |
+| C | In-phase content common to L and R |
+| FL / FR | Left/right residual after center is removed |
+| SL / SR | Side / out-of-phase |
+| T | High-frequency side, above the head |
 
-STFT のセンター抽出が先。Worklet が使えないときは Mid/Side のフィルタグラフに落とす。テストステレオは左 440Hz、右 E5、共通 110Hz、逆相ノイズ。
+STFT center extraction first. If the worklet cannot load, it falls back to a mid/side filter graph. The test stereo is 440 Hz left, E5 right, 110 Hz common, out-of-phase noise.
 
-## 構成
+## Pipeline
 
 ```
-カメラ → MediaPipe Face Landmarker（4x4 姿勢）
-      → キャリブレーション相対 6DoF
-      → Resonance Audio（Ambisonic 3次 + 部屋反射）
-      → ヘッドホン
+camera → MediaPipe Face Landmarker
+      → pose relative to calibration
+      → listener (ears ITD, or Resonance Audio 3rd-order Ambisonics + HRTF)
 
-音声入力 / ステレオファイル → STFT 分離（C/FL/FR/SL/SR/T）→ 各オブジェクト
+audio input / stereo file
+      → stereo pair worklet  (identity = copy, else ITD/ILD)
+      → or STFT upmix (C/FL/FR/SL/SR/T) → one object each
 ```
 
-Resonance Audio が読めない場合は Web Audio `PannerNode`（HRTF）に落とす。
+If Resonance Audio is missing, Web Audio `PannerNode` (HRTF) is the fallback. Room reverb is off unless you enable it.

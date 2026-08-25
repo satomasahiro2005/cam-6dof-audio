@@ -1,3 +1,6 @@
+import { azEl, getLayout, resolvePos } from "./layouts.js";
+export { LAYOUTS } from "./layouts.js";
+
 const ROOM_SIZE = { width: 8, height: 3.2, depth: 8 };
 const ROOM_MAT = {
   left: "brick-bare",
@@ -15,16 +18,6 @@ const ROOM_DRY = {
   down: "transparent",
   up: "transparent",
 };
-
-function azEl(azDeg, elDeg, r, y0 = 1.2) {
-  const az = (azDeg * Math.PI) / 180;
-  const el = (elDeg * Math.PI) / 180;
-  return {
-    x: Math.sin(az) * Math.cos(el) * r,
-    y: y0 + Math.sin(el) * r,
-    z: -Math.cos(az) * Math.cos(el) * r,
-  };
-}
 
 export const DEFAULT_SOURCES = [
   { id: "front", name: "前", x: 0, y: 1.2, z: -2.2, color: "#d4a017", kind: "melody" },
@@ -77,6 +70,8 @@ export class SpatialEngine {
     this._peakBuf = null;
     this.headRadius = DEFAULT_HEAD_RADIUS;
     this.spatializer = "ears";
+    this.layoutId = "stereo30";
+    this.layoutRadius = 2.2;
     this.listenerPose = {
       x: 0,
       y: 1.2,
@@ -127,6 +122,7 @@ export class SpatialEngine {
     for (const spec of UPMIX_SOURCES) {
       this._spawn(spec, false);
     }
+    this._applyLayout();
     return this.backend;
   }
 
@@ -153,6 +149,7 @@ export class SpatialEngine {
   setHeadRadius(meters) {
     this.headRadius = Math.max(0.055, Math.min(0.12, meters));
     this._updateEarDelays();
+    this._pushStereoPose();
   }
 
   formatInfo() {
@@ -178,9 +175,11 @@ export class SpatialEngine {
     const baseSec = this.ctx?.baseLatency ?? 0;
     const outSec = this.ctx?.outputLatency ?? 0;
     const inSec = this.liveStream?.getAudioTracks?.()[0]?.getSettings?.()?.latency ?? 0;
+    const pairOn = this.mode === "pair" && this.stereo6dof;
     const upmixOn = this.upmixKind === "stft" && this.mode === "upmix";
-    const stft = upmixOn ? UPMIX_FFT_SIZE : 0;
-    const hop = upmixOn ? UPMIX_HOP_SIZE : 0;
+    const ident = pairOn && this._poseIsIdentity();
+    const stft = pairOn ? (ident ? 0 : 256) : upmixOn ? UPMIX_FFT_SIZE : 0;
+    const hop = pairOn ? 0 : upmixOn ? UPMIX_HOP_SIZE : 0;
     const surround = upmixOn ? Math.round(UPMIX_SURROUND_SEC * sr) : 0;
     const base = Math.round(baseSec * sr);
     const output = Math.round(outSec * sr);
@@ -249,6 +248,87 @@ export class SpatialEngine {
       l.setOrientation(f.x, f.y, f.z, u.x, u.y, u.z);
     }
     this._updateEarDelays();
+    this._pushStereoPose();
+  }
+
+  _pushStereoPose() {
+    const p = this.listenerPose;
+    if (!this.stereo6dof) return;
+    const fl = this.sources.get("upmix-FL");
+    const fr = this.sources.get("upmix-FR");
+    this.stereo6dof.port.postMessage({
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      fx: p.forward.x,
+      fy: p.forward.y,
+      fz: p.forward.z,
+      ux: p.up.x,
+      uy: p.up.y,
+      uz: p.up.z,
+      headRadius: this.headRadius,
+      flx: fl?.x ?? -1.1,
+      fly: fl?.y ?? 1.2,
+      flz: fl?.z ?? -1.905,
+      frx: fr?.x ?? 1.1,
+      fry: fr?.y ?? 1.2,
+      frz: fr?.z ?? -1.905,
+    });
+  }
+
+  _poseIsIdentity() {
+    const p = this.listenerPose;
+    if (!p) return true;
+    return (
+      Math.abs(p.x) < 1e-4 &&
+      Math.abs(p.z) < 1e-4 &&
+      Math.abs(p.y - this.listenerY) < 1e-4 &&
+      Math.abs(p.forward.x) < 1e-4 &&
+      Math.abs(p.forward.z + 1) < 1e-4 &&
+      Math.abs(p.up.y - 1) < 1e-4
+    );
+  }
+
+  setSpeakerLayout(id) {
+    this.layoutId = getLayout(id).id;
+    this._applyLayout();
+  }
+
+  setLayoutRadius(meters) {
+    this.layoutRadius = Math.max(0.8, Math.min(4, meters));
+    this._applyLayout();
+  }
+
+  _applyLayout() {
+    const L = getLayout(this.layoutId);
+    const R = this.layoutRadius;
+    const pair = L.pair;
+    this._moveSource("upmix-FL", resolvePos(pair.fl, R));
+    this._moveSource("upmix-FR", resolvePos(pair.fr, R));
+    for (const [key, def] of Object.entries(L.upmix)) {
+      this._moveSource(`upmix-${key}`, resolvePos(def, R));
+    }
+    for (const [key, def] of Object.entries(L.demo)) {
+      this._moveSource(key, resolvePos(def, R));
+    }
+    this._updateEarDelays();
+    this._pushStereoPose();
+  }
+
+  _moveSource(id, pos) {
+    const s = this.sources.get(id);
+    if (!s || !pos) return;
+    s.x = pos.x;
+    s.y = pos.y;
+    s.z = pos.z;
+    s.src?.setPosition(pos.x, pos.y, pos.z);
+    if (s.panner?.positionX) {
+      s.panner.positionX.value = pos.x;
+      s.panner.positionY.value = pos.y;
+      s.panner.positionZ.value = pos.z;
+    } else if (s.panner?.setPosition) {
+      s.panner.setPosition(pos.x, pos.y, pos.z);
+    }
   }
 
   setSourceGain(id, gain) {
@@ -287,9 +367,7 @@ export class SpatialEngine {
   }
 
   async startLiveInput(deviceId) {
-    await this._ensureUpmix();
     this._stopUpmixSrc();
-    this.setMode("upmix");
     const stream = await openAudioInput(deviceId);
     this.liveStream = stream;
     this.liveNode = this.ctx.createMediaStreamSource(stream);
@@ -299,10 +377,18 @@ export class SpatialEngine {
       this.inputAnalyser.smoothingTimeConstant = 0.3;
       this._peakBuf = new Float32Array(this.inputAnalyser.fftSize);
     }
-    this.liveNode.connect(this.upmixInput);
     this.liveNode.connect(this.inputAnalyser);
+    if (this.mode === "upmix") {
+      await this._ensureUpmix();
+      this.liveNode.connect(this.upmixInput);
+      this.setMode("upmix");
+    } else {
+      await this._ensureStereo6DoF();
+      this.liveNode.connect(this.stereo6dof);
+      this.setMode("pair");
+    }
     this.upmixLabel = stream.getAudioTracks()[0]?.label || "audio-input";
-    return { kind: this.upmixKind, label: this.upmixLabel, channels: this.liveNode.channelCount };
+    return { kind: this.mode === "upmix" ? this.upmixKind : "pair", label: this.upmixLabel, channels: this.liveNode.channelCount };
   }
 
   inputPeak() {
@@ -321,22 +407,46 @@ export class SpatialEngine {
   }
 
   async playUpmixBuffer(buffer, label = "") {
-    await this._ensureUpmix();
     this._stopUpmixSrc();
-    this.setMode("upmix");
     const src = this.ctx.createBufferSource();
     src.buffer = buffer;
     src.loop = true;
-    src.connect(this.upmixInput);
+    if (this.mode === "upmix") {
+      await this._ensureUpmix();
+      src.connect(this.upmixInput);
+      this.setMode("upmix");
+    } else {
+      await this._ensureStereo6DoF();
+      src.connect(this.stereo6dof);
+      this.setMode("pair");
+    }
     src.start();
     this.upmixSrc = src;
     this.upmixLabel = label;
-    return this.upmixKind;
+    return this.mode === "upmix" ? this.upmixKind : "pair";
+  }
+
+  async _ensureStereo6DoF() {
+    if (this.stereo6dof) return;
+    await this.ctx.audioWorklet.addModule(new URL("./stereo-6dof-processor.js", import.meta.url));
+    const node = new AudioWorkletNode(this.ctx, "stereo-6dof", {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+      channelCount: 2,
+      channelCountMode: "explicit",
+      channelInterpretation: "speakers",
+    });
+    node.connect(this.master);
+    this.stereo6dof = node;
+    this._pushStereoPose();
   }
 
   setMode(mode) {
+    if (mode === "stereo") mode = "pair";
     this.mode = mode;
     const demo = mode === "demo";
+    const pair = mode === "pair";
     for (const spec of DEFAULT_SOURCES) {
       const s = this.sources.get(spec.id);
       if (!s) continue;
@@ -346,7 +456,10 @@ export class SpatialEngine {
     }
     for (const spec of UPMIX_SOURCES) {
       const s = this.sources.get(spec.id);
-      if (s) s.gain.gain.value = demo ? 0 : s.userGain;
+      if (!s) continue;
+      if (demo) s.gain.gain.value = 0;
+      else if (pair) s.gain.gain.value = 0;
+      else s.gain.gain.value = s.userGain;
     }
     if (demo) this._stopUpmixSrc();
   }
@@ -362,7 +475,25 @@ export class SpatialEngine {
   }
 
   currentLayout() {
-    return this.mode === "upmix" ? UPMIX_SOURCES : DEFAULT_SOURCES;
+    const ids =
+      this.mode === "upmix"
+        ? UPMIX_SOURCES.map((s) => s.id)
+        : this.mode === "pair"
+          ? ["upmix-FL", "upmix-FR"]
+          : DEFAULT_SOURCES.map((s) => s.id);
+    return ids.map((id) => {
+      const s = this.sources.get(id);
+      const fallback = UPMIX_SOURCES.find((u) => u.id === id) || DEFAULT_SOURCES.find((d) => d.id === id);
+      return {
+        id,
+        name: s?.name || fallback?.name || id,
+        x: s?.x ?? fallback?.x ?? 0,
+        y: s?.y ?? fallback?.y ?? 1.2,
+        z: s?.z ?? fallback?.z ?? 0,
+        color: s?.color || fallback?.color || "#d4a017",
+        ch: s?.ch ?? fallback?.ch,
+      };
+    });
   }
 
   async _decode(file) {
@@ -526,8 +657,8 @@ export class SpatialEngine {
     gR.gain.value = 1;
     gain.connect(delayL);
     gain.connect(delayR);
-    delayL.connect(lpL).connect(gL).connect(this.earsMerger, 0, 0);
-    delayR.connect(lpR).connect(gR).connect(this.earsMerger, 0, 1);
+    delayL.connect(gL).connect(this.earsMerger, 0, 0);
+    delayR.connect(gR).connect(this.earsMerger, 0, 1);
     return { delayL, delayR, lpL, lpR, gL, gR };
   }
 
@@ -547,18 +678,15 @@ export class SpatialEngine {
       const dR = Math.max(0.05, dist(s, rightEar));
       const secL = dL / SPEED_OF_SOUND;
       const secR = dR / SPEED_OF_SOUND;
-      s.ears.secL = secL;
-      s.ears.secR = secR;
-      s.ears.delayL.delayTime.setTargetAtTime(secL, t, 0.015);
-      s.ears.delayR.delayTime.setTargetAtTime(secR, t, 0.015);
-      s.ears.gL.gain.setTargetAtTime(Math.min(3.5, 1.8 / dL), t, 0.015);
-      s.ears.gR.gain.setTargetAtTime(Math.min(3.5, 1.8 / dR), t, 0.015);
-      const relx = s.x - lp.x;
-      const rely = s.y - lp.y;
-      const relz = s.z - lp.z;
-      const side = (relx * right.x + rely * right.y + relz * right.z) / Math.max(0.2, Math.hypot(relx, rely, relz));
-      s.ears.lpL.frequency.setTargetAtTime(16000 * (0.22 + 0.78 * (1 - Math.max(0, side))), t, 0.02);
-      s.ears.lpR.frequency.setTargetAtTime(16000 * (0.22 + 0.78 * (1 - Math.max(0, -side))), t, 0.02);
+      const earlier = Math.min(secL, secR);
+      s.ears.secL = secL - earlier;
+      s.ears.secR = secR - earlier;
+      s.ears.delayL.delayTime.setTargetAtTime(s.ears.secL, t, 0.01);
+      s.ears.delayR.delayTime.setTargetAtTime(s.ears.secR, t, 0.01);
+      s.ears.gL.gain.setTargetAtTime(Math.min(2.5, 1.8 / dL), t, 0.01);
+      s.ears.gR.gain.setTargetAtTime(Math.min(2.5, 1.8 / dR), t, 0.01);
+      s.ears.lpL.frequency.setTargetAtTime(20000, t, 0.02);
+      s.ears.lpR.frequency.setTargetAtTime(20000, t, 0.02);
     }
   }
 

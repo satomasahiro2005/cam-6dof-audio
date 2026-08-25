@@ -1,5 +1,6 @@
 import { HeadTracker, listCameras } from "./tracker.js";
-import { SpatialEngine, DEFAULT_SOURCES, UPMIX_SOURCES, listAudioInputs, unlockAudioDevices } from "./audio-engine.js";
+import { SpatialEngine, listAudioInputs, unlockAudioDevices } from "./audio-engine.js";
+import { LAYOUTS } from "./layouts.js";
 import { RoomView } from "./scene.js";
 
 const $ = (id) => document.getElementById(id);
@@ -85,6 +86,13 @@ function applyDoF(raw) {
     pose.y = clamp(pose.y, -0.5, 0.5);
     pose.z = clamp(pose.z, -limit, limit);
   }
+  return snapCenter(pose);
+}
+
+function snapCenter(pose) {
+  const pos = Math.hypot(pose.x, pose.y, pose.z);
+  const ang = Math.hypot(pose.yaw, pose.pitch, pose.roll);
+  if (pos < 0.04 && ang < (4 * Math.PI) / 180) return { ...IDENTITY };
   return pose;
 }
 
@@ -182,7 +190,8 @@ async function start() {
     $("hint").textContent = "正面を見てキャリブレーションを押す。ヘッドホン必須。";
     if ($("audioIn").value) {
       try {
-        $("mode").value = "upmix";
+        if ($("mode").value === "demo") $("mode").value = "pair";
+        engine.setMode($("mode").value);
         const info = await engine.startLiveInput($("audioIn").value);
         buildSourceList();
         refreshFormat();
@@ -208,15 +217,19 @@ function stop() {
 }
 
 function buildSourceList() {
-  const upmix = $("mode").value === "upmix";
-  const layout = upmix ? UPMIX_SOURCES : DEFAULT_SOURCES;
+  const mode = $("mode").value;
+  const upmix = mode === "upmix";
+  const pair = mode === "pair";
+  const layout = engine.currentLayout();
   const root = $("sourceList");
   root.innerHTML = "";
   $("upmixPanel").hidden = !upmix;
-  $("dropTargetRow").hidden = upmix;
+  $("dropTargetRow").hidden = upmix || pair;
   $("sourceHint").textContent = upmix
     ? "ステレオを FL / FR / C / SL / SR / T に分けて、各スピーカを6DoFで聴く。"
-    : "部屋に置いてある音源。ファイルをドロップするとその位置でループする。";
+    : pair
+      ? "L を左前、R を右前のスピーカに置く。分解しない。"
+      : "部屋に置いてある音源。ファイルをドロップするとその位置でループする。";
   for (const spec of layout) {
     const el = document.createElement("div");
     el.className = "source";
@@ -264,9 +277,24 @@ function renderEngineLatency() {
     `エンジン遅延 ${d.total} smp (${d.totalMs.toFixed(1)} ms) = 入力 ${d.input} + STFT ${d.stft} + base ${d.base} + out ${d.output}`;
 }
 
+function applySpeakerLayout() {
+  const id = $("layout").value;
+  const r = Number($("layoutR").value);
+  $("layoutRVal").textContent = r.toFixed(1);
+  if (!engine.ctx) {
+    engine.layoutId = id;
+    engine.layoutRadius = r;
+    return;
+  }
+  engine.setSpeakerLayout(id);
+  engine.setLayoutRadius(r);
+  buildSourceList();
+}
+
 async function applyMode(mode) {
   await ensureEngine();
   engine.setMode(mode);
+  applySpeakerLayout();
   buildSourceList();
   if (mode === "upmix" && !engine.upmixSrc && !engine.liveActive) {
     $("hint").textContent = "音声入力を選ぶか、ファイル／テストステレオを再生。";
@@ -308,6 +336,11 @@ function bindUi() {
     refreshFormat();
   });
   $("mode").addEventListener("change", (e) => applyMode(e.target.value));
+  $("layout").addEventListener("change", applySpeakerLayout);
+  $("layoutR").addEventListener("input", (e) => {
+    $("layoutRVal").textContent = Number(e.target.value).toFixed(1);
+    applySpeakerLayout();
+  });
   $("audioIn").addEventListener("change", onAudioInputChange);
   $("audioList").addEventListener("click", revealAudioInputs);
   $("sourceList").addEventListener("input", (e) => {
@@ -327,21 +360,22 @@ function bindUi() {
     });
   }
   $("testStereo").addEventListener("click", async () => {
-    $("mode").value = "upmix";
     await ensureEngine();
+    if ($("mode").value === "demo") $("mode").value = "pair";
+    engine.setMode($("mode").value);
     const kind = await engine.playTestStereo();
     buildSourceList();
-    $("hint").textContent = `テストステレオを分離再生中（${kind}）。左440Hz / 右E5 / 共通バス / 逆相ノイズ。`;
+    $("hint").textContent = `テストステレオ再生中（${kind}）。`;
   });
 
   const drop = $("drop");
   const onFile = async (file, id) => {
     await ensureEngine();
-    if ($("mode").value === "upmix" || engine.mode === "upmix") {
-      $("mode").value = "upmix";
+    if ($("mode").value === "upmix" || $("mode").value === "pair") {
+      engine.setMode($("mode").value);
       const kind = await engine.playUpmixFile(file);
       buildSourceList();
-      $("hint").textContent = `${file.name} を仮想マルチチャンネルに分離した（${kind}）。`;
+      $("hint").textContent = `${file.name} を再生中（${kind}）。`;
       return;
     }
     await engine.loadFile(id, file);
@@ -445,15 +479,16 @@ async function onAudioInputChange() {
     $("inPeak").style.width = "0%";
     return;
   }
-  $("mode").value = "upmix";
+  if ($("mode").value === "demo") $("mode").value = "pair";
   await ensureEngine();
+  engine.setMode($("mode").value);
   try {
     const info = await engine.startLiveInput(id);
     buildSourceList();
     await fillAudioInputs();
     $("audioIn").value = id;
     refreshFormat();
-    $("hint").textContent = `${info.label} を仮想マルチで再生中。`;
+    $("hint").textContent = `${info.label} を ${$("mode").value === "upmix" ? "仮想マルチ" : "ステレオ対"} で再生中。`;
   } catch (err) {
     $("hint").textContent = `音声入力: ${err.message}`;
     $("audioIn").value = "";
@@ -479,6 +514,19 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+function fillLayouts() {
+  const sel = $("layout");
+  sel.innerHTML = "";
+  for (const L of LAYOUTS) {
+    const opt = document.createElement("option");
+    opt.value = L.id;
+    opt.textContent = L.name;
+    sel.appendChild(opt);
+  }
+  sel.value = "stereo30";
+}
+
+fillLayouts();
 buildSourceList();
 bindUi();
 fillCameras();

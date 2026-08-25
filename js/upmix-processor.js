@@ -95,9 +95,9 @@ class StereoUpmixProcessor extends AudioWorkletProcessor {
     const hzPerBin = sampleRate / FFTN;
     const cLo = Math.max(1, Math.floor(140 / hzPerBin));
     const tLo = Math.max(1, Math.floor(3200 / hzPerBin));
-    const slTap = Math.round(0.013 * sampleRate) % DELAY;
-    const srTap = Math.round(0.019 * sampleRate) % DELAY;
-    const tTap = Math.round(0.008 * sampleRate) % DELAY;
+    const slTap = 0;
+    const srTap = 0;
+    const tTap = 0;
 
     for (let i = 0; i < FFTN; i++) {
       const idx = (this.iptr + i) & (FFTN - 1);
@@ -151,7 +151,7 @@ class StereoUpmixProcessor extends AudioWorkletProcessor {
     for (let c = 0; c < 4; c++) fft(this.outRe[c], this.outIm[c], true);
     fft(this.tRe, this.tIm, true);
 
-    const scale = 0.5;
+    const scale = 2 / 3;
     for (let c = 0; c < 4; c++) {
       for (let i = 0; i < FFTN; i++) {
         this.ola[c][i] += this.outRe[c][i] * this.window[i] * scale;

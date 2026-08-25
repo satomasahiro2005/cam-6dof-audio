@@ -74,8 +74,15 @@
           <label class="row">再生
             <select id="mode">
               <option value="demo">デモ音場（5オブジェクト）</option>
-              <option value="upmix">ステレオ → 仮想マルチ</option>
+              <option value="pair" selected>ステレオ対（L/R）</option>
+              <option value="upmix">仮想マルチ（STFT）</option>
             </select>
+          </label>
+          <label class="row">配置
+            <select id="layout"></select>
+          </label>
+          <label class="row">配置距離 <span id="layoutRVal">2.2</span>
+            <input id="layoutR" type="range" min="1.2" max="3.6" step="0.1" value="2.2" />
           </label>
           <div class="actions">
             <button id="start" class="primary">開始</button>
@@ -98,8 +105,9 @@
           </dl>
         </div>
       </section>
-      <section class="col">
+      <section class="col view-col">
         <canvas id="view"></canvas>
+        <p class="view-hint">ドラッグで回転 / 右ドラッグで移動 / ホイールで拡大 / ダブルクリックで戻す</p>
       </section>
       <section class="col sources">
         <p id="sourceHint" class="hint">部屋に置いてある音源。ファイルをドロップするとその位置でループする。</p>
@@ -136,7 +144,7 @@
     </main>
     <footer>
       <span id="footerFmt">内部 32bit float。入力はデバイス次第（16/24bit を 48kHz 希望）</span>
-      <span>WASD 移動 / 矢印 回転 / C キャリブ / 0·3·6 DoF</span>
+      <span>WASD 移動 / 矢印 回転 / C キャリブ / 0·3·6 DoF / 3D はドラッグ</span>
     </footer>
     <script type="module" src="js/app.js"></script>
   </body>
