@@ -230,9 +230,9 @@ export class HeadTracker {
     forward.normalize();
     const up = new THREE.Vector3().crossVectors(right, forward).normalize();
     forward.crossVectors(up, right).normalize();
-    const m = new THREE.Matrix4().makeBasis(right, up, forward.clone().negate());
+    const m = new THREE.Matrix4().makeBasis(right, up, forward);
     const e = new THREE.Euler().setFromRotationMatrix(m, "YXZ");
-    return { yaw: e.y, pitch: e.x, roll: e.z };
+    return { yaw: e.y, pitch: -e.x, roll: -e.z };
   }
 
   _lmWorld(p) {
@@ -245,7 +245,7 @@ export class HeadTracker {
     this._world.multiplyMatrices(CAM_TO_WORLD, this._raw);
     this._world.decompose(this._dummy, this._quat, this._scale);
     const e = new THREE.Euler().setFromQuaternion(this._quat, "YXZ");
-    return { yaw: e.y, pitch: e.x, roll: e.z };
+    return { yaw: e.y, pitch: -e.x, roll: -e.z };
   }
 
   _resetFilters() {
