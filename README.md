@@ -1,13 +1,20 @@
 # Cam 6DoF Audio
 
-Webcam head tracking (6DoF) driving a binaural spatial audio engine in the browser.
+Proof of concept. Webcam head tracking (6DoF) driving a binaural spatial audio engine in the browser.
+
+The intended use is **system audio in via a virtual cable** (VB-CABLE, VoiceMeeter, etc.). Pick that device as the audio input and listen on headphones. Browsers have no loopback of their own. Dropping a file or running the demo objects is for trying the renderer, not the main path.
 
 ## Requirements
 
 - Chrome / Edge
 - Headphones
 - Webcam
-- Local HTTP (the camera API does not work on `file://`)
+- A virtual audio cable, if you want to feed PC playback
+- HTTPS or localhost (the camera/mic APIs do not work on `file://`)
+
+Live: https://satomasahiro2005.github.io/cam-6dof-audio/
+
+Or locally:
 
 ```powershell
 cd C:\Users\masahiro\workspace\cam-6dof-audio
@@ -18,13 +25,13 @@ Open `http://localhost:8765`.
 
 ## Usage
 
-1. Put headphones on
-2. Click **List** or **Start** and allow the microphone (device names stay hidden until then), then pick an input
-3. **Start** → allow the camera → look forward and hit **Calibrate**
-4. Turn your head (3DoF) or lean (6DoF)
-5. Drop a file to play it
+1. Route the PC’s output into a virtual cable (set that as the Windows default playback device, or send only the apps you want)
+2. Put headphones on (echo cancellation is off)
+3. Click **List** or **Start** and allow the microphone (device names stay hidden until then), then pick the virtual cable as the input
+4. **Start** → allow the camera → look forward and hit **Calibrate**
+5. Turn your head (3DoF) or lean (6DoF)
 
-To route PC playback, pick VB-CABLE or VoiceMeeter as the input. Browsers have no loopback of their own. Echo cancellation is off, so headphones are the point.
+You can also drop a file onto the page to play it, without a virtual cable. That is secondary.
 
 The same pose can be driven from the keyboard (no camera needed).
 
