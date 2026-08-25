@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cam 6DoF Audio</title>
+    <link rel="stylesheet" href="css/app.css" />
+    <script src="https://cdn.jsdelivr.net/npm/resonance-audio/build/resonance-audio.min.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header>
+      <h1>Cam 6DoF Audio</h1>
+      <span id="status" class="badge lost">IDLE</span>
+      <span id="backend" class="badge">engine</span>
+      <span id="format" class="badge">— Hz</span>
+      <span id="engDelay" class="badge">遅延 — smp</span>
+      <span id="dofLabel" class="badge">6DoF</span>
+    </header>
+    <main>
+      <section class="col">
+        <div class="cam-wrap">
+          <video id="cam" playsinline muted></video>
+          <canvas id="overlay"></canvas>
+        </div>
+        <div class="controls">
+          <label class="row">カメラ
+            <select id="camera"></select>
+          </label>
+          <label class="row">音声入力
+            <span class="pick">
+              <select id="audioIn"></select>
+              <button type="button" id="audioList">一覧</button>
+            </span>
+          </label>
+          <div class="in-meter" title="入力レベル"><i id="inPeak"></i></div>
+          <label class="row">DoF
+            <select id="dof">
+              <option value="0">0 — 固定</option>
+              <option value="3">3 — 回転のみ</option>
+              <option value="6" selected>6 — 回転 + 移動</option>
+            </select>
+          </label>
+          <label class="row">視点
+            <select id="viewMode">
+              <option value="behind" selected>後ろから</option>
+              <option value="mirror">鏡</option>
+            </select>
+          </label>
+          <label class="row">移動スケール <span id="scaleVal">2.00</span>
+            <input id="scale" type="range" min="0.5" max="3.5" step="0.05" value="2" />
+          </label>
+          <label class="row">マスター
+            <input id="master" type="range" min="0" max="2" step="0.01" value="1" />
+          </label>
+          <label class="row">部屋残響
+            <input id="room" type="checkbox" />
+          </label>
+          <label class="row">空間化
+            <select id="spatializer">
+              <option value="ears" selected>耳位置（ITD）</option>
+              <option value="hrtf">HRTF（Omnitone）</option>
+            </select>
+          </label>
+          <label class="row">頭半径 <span id="headVal">8.75cm / 耳間 17.5cm</span>
+            <input id="headRadius" type="range" min="6" max="12" step="0.05" value="8.75" />
+          </label>
+          <label class="row">再生
+            <select id="mode">
+              <option value="demo">デモ音場（5オブジェクト）</option>
+              <option value="upmix">ステレオ → 仮想マルチ</option>
+            </select>
+          </label>
+          <div class="actions">
+            <button id="start" class="primary">開始</button>
+            <button id="calibrate" disabled>キャリブレーション</button>
+            <button id="stop" disabled>停止</button>
+          </div>
+          <p id="hint" class="hint">ヘッドホンをつけて開始。正面を見てキャリブレーション。</p>
+        </div>
+        <div class="pose">
+          <dl>
+            <dt>X</dt><dd class="bar"><i id="bx"></i></dd><dd id="px">+0.00</dd>
+            <dt>Y</dt><dd class="bar"><i id="by"></i></dd><dd id="py">+0.00</dd>
+            <dt>Z</dt><dd class="bar"><i id="bz"></i></dd><dd id="pz">+0.00</dd>
+            <dt>Yaw</dt><dd class="bar"><i id="byaw"></i></dd><dd id="yaw">0°</dd>
+            <dt>Pitch</dt><dd class="bar"><i id="bpitch"></i></dd><dd id="pitch">0°</dd>
+            <dt>Roll</dt><dd class="bar"><i id="broll"></i></dd><dd id="roll">0°</dd>
+            <dt>遅延</dt><dd id="engTotal" class="span2">— smp</dd>
+            <dt>STFT</dt><dd id="engStft" class="span2">—</dd>
+            <dt>device</dt><dd id="engDev" class="span2">—</dd>
+          </dl>
+        </div>
+      </section>
+      <section class="col">
+        <canvas id="view"></canvas>
+      </section>
+      <section class="col sources">
+        <p id="sourceHint" class="hint">部屋に置いてある音源。ファイルをドロップするとその位置でループする。</p>
+        <div id="upmixPanel" class="upmix" hidden>
+          <p class="hint">相関の高い成分をセンター、左右固有を FL/FR、逆相・残差をサラウンド／ハイトへ送る。</p>
+          <label class="row">センター <span id="centerVal">0.85</span>
+            <input id="upmixCenter" type="range" min="0" max="1.5" step="0.01" value="0.85" />
+          </label>
+          <label class="row">サラウンド <span id="surroundVal">0.70</span>
+            <input id="upmixSurround" type="range" min="0" max="1.5" step="0.01" value="0.70" />
+          </label>
+          <label class="row">ハイト <span id="heightVal">0.45</span>
+            <input id="upmixHeight" type="range" min="0" max="1.5" step="0.01" value="0.45" />
+          </label>
+          <label class="row">フロント幅 <span id="widthVal">1.00</span>
+            <input id="upmixWidth" type="range" min="0" max="1.5" step="0.01" value="1.00" />
+          </label>
+          <div class="actions">
+            <button id="testStereo">テストステレオ</button>
+          </div>
+        </div>
+        <div id="sourceList" class="source-list"></div>
+        <label id="dropTargetRow" class="row">配置先
+          <select id="dropTarget">
+            <option value="front">前</option>
+            <option value="left">左</option>
+            <option value="right">右</option>
+            <option value="rear">後</option>
+            <option value="up">上</option>
+          </select>
+        </label>
+        <div id="drop" class="drop">WAV / MP3 / OGG をドロップ<br />または <input id="file" type="file" accept="audio/*" /></div>
+      </section>
+    </main>
+    <footer>
+      <span id="footerFmt">内部 32bit float。入力はデバイス次第（16/24bit を 48kHz 希望）</span>
+      <span>WASD 移動 / 矢印 回転 / C キャリブ / 0·3·6 DoF</span>
+    </footer>
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
